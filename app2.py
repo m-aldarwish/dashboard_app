@@ -1,3 +1,29 @@
+from flask import Flask, render_template
+import threading
+import ProtocolBridgingMicrocontroller  # Import your background process
+
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return render_template("main.html")
+
+# ---- Start background process as a separate thread ----
+def start_background():
+    try:
+        ProtocolBridgingMicrocontroller.main()
+    except Exception as e:
+        print(f"[Background Thread Error] {e}")
+
+thread = threading.Thread(target=start_background, daemon=True)
+thread.start()
+
+# ---- Flask entry point ----
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
+
+
+
 from flask import Flask, render_template, request, jsonify, Response, session, redirect, url_for
 from datetime import timedelta
 import threading
@@ -125,4 +151,5 @@ def control():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
+
     app.run(debug=True)
