@@ -4,3 +4,4 @@ paho-mqtt
 pandas
 numpy
 openpyxl
+pyserial
