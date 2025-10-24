@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hydrogen Electrolyzer Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: 'Poppins', sans-serif;
+      color: #212529;
+    }
+
+    nav.navbar {
+      background: linear-gradient(90deg, #0D6EFD, #0B5345);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .navbar-brand {
+      font-weight: 700;
+      color: #fff !important;
+    }
+
+    .card {
+      background: white;
+      border: none;
+      border-radius: 16px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+    }
+
+    .progress {
+      height: 22px;
+      border-radius: 10px;
+      background-color: #e9ecef;
+    }
+
+    .progress-bar {
+      font-weight: 600;
+      transition: width 0.5s ease;
+    }
+
+    .sensor-value {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #0B5345;
+    }
+
+    .alert {
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    footer {
+      text-align: center;
+      color: #6c757d;
+      margin-top: 40px;
+      font-size: 0.9rem;
+    }
+
+    .btn-control {
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding: 10px 25px;
+      border-radius: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- NAVBAR -->
+  <nav class="navbar navbar-expand-lg navbar-dark">
+    <div class="container-fluid d-flex justify-content-between align-items-center">
+      <span class="navbar-brand">Hydrogen Electrolyzer Dashboard</span>
+      <div>
+        <span class="text-light me-3">Logged in as: {{ user }} ({{ role }})</span>
+        <a href="{{ url_for('history_page') }}" class="btn btn-outline-light btn-sm me-2">History</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <div class="container my-5">
+    <div class="text-center mb-5">
+      <h2 class="fw-bold text-success">Green Hydrogen Operations</h2>
+      <p class="text-muted">Real-time insights, safety monitoring, and predictive maintenance powered by AI + IoT</p>
+    </div>
+
+    <!-- Remaining Useful Life -->
+    <div class="card p-4 mb-4 text-center">
+      <h4 class="mb-3 text-primary">Remaining Useful Life</h4>
+      <h1 id="rul" class="fw-bold text-success">--%</h1>
+      <div class="progress mt-3">
+        <div id="rul-bar" class="progress-bar bg-success" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- Maintenance Alert -->
+    <div id="alert-area"></div>
+
+    <!-- SENSOR + SYSTEM SECTION -->
+    <div class="row">
+      <!-- SENSOR DATA -->
+      <div class="col-lg-6 mb-4">
+        <div class="card p-4">
+          <h5 class="text-info fw-bold mb-3">Sensor Readings</h5>
+          <table class="table table-borderless align-middle">
+            <tbody>
+              <tr><td>Gas ADC</td><td id="gas_adc" class="sensor-value text-end">--</td></tr>
+              <tr><td>Temperature (°C)</td><td id="temperature_c" class="sensor-value text-end">--</td></tr>
+              <tr><td>Current (A)</td><td id="current_a" class="sensor-value text-end">--</td></tr>
+              <tr><td>Voltage (V)</td><td id="voltage_v" class="sensor-value text-end">--</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SYSTEM STATUS -->
+      <div class="col-lg-6 mb-4">
+        <div class="card p-4 text-center">
+          <h5 class="text-primary fw-bold mb-3">System Status</h5>
+          <h4 id="system-status" class="fw-bold text-success mb-3">Loading...</h4>
+
+          {% if role == 'Admin' %}
+          <form action="{{ url_for('toggle_system') }}" method="POST">
+            <button id="controlButton" type="submit" class="btn btn-danger btn-control shadow-lg">Emergency Shutdown</button>
+          </form>
+          {% else %}
+          <p class="text-muted">(Operator view only)</p>
+          {% endif %}
+        </div>
+
+        <!-- VALVE CONTROL -->
+        <div class="card p-4 mt-4 text-center">
+          <h5 class="text-primary fw-bold mb-3">Water Flow Valve</h5>
+          {% if role == 'Admin' %}
+          <input type="range" id="valveSlider" min="0" max="100" value="{{ valve }}" class="form-range mb-2" style="width:80%">
+          <p>Valve Opening: <span id="valveValue" class="fw-bold text-success">{{ valve }}</span>%</p>
+          {% else %}
+          <p>Valve Opening: <span id="valveValue" class="fw-bold text-success">{{ valve }}</span>% (read-only)</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>ACWA Power × Hackathon 2025 | Smart Hydrogen Predictive Maintenance System</footer>
+
+  <!-- REAL-TIME DATA STREAM -->
+  <script>
+    const role = "{{ role }}";
+    const evtSource = new EventSource("/stream");
+
+    evtSource.onmessage = function(event) {
+      const data = JSON.parse(event.data);
+
+      // Update RUL
+      const rul = data.RUL;
+      const bar = document.getElementById("rul-bar");
+      document.getElementById("rul").textContent = rul.toFixed(1) + "%";
+      bar.style.width = rul + "%";
+      bar.className = "progress-bar";
+      if (rul > 70) bar.classList.add("bg-success");
+      else if (rul > 40) bar.classList.add("bg-warning");
+      else bar.classList.add("bg-danger");
+
+      // Maintenance alert
+      const alertArea = document.getElementById("alert-area");
+      alertArea.innerHTML = data.maintenance_alert
+        ? `<div class='alert alert-danger text-center mt-3'>${data.maintenance_alert}</div>` : "";
+
+      // Sensor updates
+      const s = data.sensor_data;
+      document.getElementById("gas_adc").textContent = s.gas_adc?.toFixed ? s.gas_adc.toFixed(2) : s.gas_adc;
+      document.getElementById("temperature_c").textContent = s.temperature_c?.toFixed ? s.temperature_c.toFixed(2) : s.temperature_c;
+      document.getElementById("current_a").textContent = s.current_a?.toFixed ? s.current_a.toFixed(2) : s.current_a;
+      document.getElementById("voltage_v").textContent = s.voltage_v?.toFixed ? s.voltage_v.toFixed(2) : s.voltage_v;
+
+      // System status
+      const st = document.getElementById("system-status");
+      const btn = document.getElementById("controlButton");
+      if (data.system_on) {
+        st.textContent = "Status: ON";
+        st.className = "text-success fw-bold mb-3";
+        if (btn) { btn.textContent = "Emergency Shutdown"; btn.className = "btn btn-danger btn-control shadow-lg"; }
+      } else {
+        st.textContent = "Status: OFF";
+        st.className = "text-danger fw-bold mb-3";
+        if (btn) { btn.textContent = "Start System"; btn.className = "btn btn-success btn-control shadow-lg"; }
+      }
+
+      // Valve
+      const v = document.getElementById("valveValue");
+      if (v) v.textContent = data.valve;
+    };
+
+    // Valve control
+    if (role === "Admin") {
+      const slider = document.getElementById("valveSlider");
+      slider.addEventListener("input", () =>
+        document.getElementById("valveValue").textContent = slider.value);
+      slider.addEventListener("change", async () => {
+        await fetch("/api/valve", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({valve: slider.value})
+        });
+      });
+    }
+  </script>
+</body>
+</html>

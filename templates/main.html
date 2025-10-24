@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DigiSight – Hydrogen Monitoring</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --brand-green: #0B5345;
+      --brand-blue: #0D6EFD;
+      --text-dark: #212529;
+      --muted: #6c757d;
+    }
+    body {
+      background-color: #f8f9fa;
+      font-family: 'Poppins', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      color: var(--text-dark);
+      padding-top: 76px;
+    }
+    .navbar {
+      background: #fff !important;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      height: 76px;
+    }
+    .navbar-brand, .nav-text { color: var(--text-dark) !important; }
+    .brand-center { line-height: 1.1; text-align: center; color: var(--text-dark); }
+    .brand-center h5 { margin: 0; font-weight: 700; letter-spacing: .2px; }
+    .brand-center small { color: var(--muted); }
+    .card {
+      background: #fff; border: none; border-radius: 16px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+      padding: 20px;
+    }
+    .progress { height: 14px; border-radius: 10px; background: #e9ecef; }
+    footer { text-align: center; color: var(--muted); margin: 36px 0 24px; font-size: .95rem; }
+    canvas { max-height: 340px; }
+  </style>
+</head>
+<body>
+  <!-- FIXED WHITE NAVBAR -->
+  <nav class="navbar navbar-expand-lg fixed-top">
+    <div class="container-fluid d-flex justify-content-between align-items-center">
+      <div class="d-flex align-items-center">
+        <img src="{{ url_for('static', filename='images/sidf_logo.png') }}" alt="SIDF Hackathon" class="logo-sidf" style="height:70px"/>
+      </div>
+      <div class="brand-center">
+        <h5 class="navbar-brand mb-0">DigiSight</h5>
+        <small>Predicting Hydrogen Electrolyzer Maintenance</small>
+      </div>
+      <div class="d-flex align-items-center">
+        <img src="{{ url_for('static', filename='images/acwa_logo.png') }}" alt="ACWA Power" class="logo-acwa" style="height:50px"/>
+      </div>
+    </div>
+  </nav>
+
+  <!-- RUL + CONTROL BUTTON -->
+  <div class="container mt-4">
+    <div class="card p-4 mb-3">
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+        <div class="d-flex align-items-center gap-3 flex-grow-1">
+          <div>
+            <h6 class="text-primary mb-1">Remaining Useful Life</h6>
+            <h4 id="rul" class="fw-bold text-success mb-0" style="font-size:1.75rem;">--%</h4>
+          </div>
+          <div class="flex-grow-1">
+            <div class="progress">
+              <div id="rul-bar" class="progress-bar bg-success" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button id="toggleSystemBtn" class="btn btn-sm btn-danger">Turn Off</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="alerts-area" class="mb-4"></div>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="section-title mb-0">Live Sensor Trends</h4>
+      <button id="downloadCSV" class="btn btn-sm btn-outline-success">⬇️ Download CSV</button>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-6"><div class="card"><h6>Gas ADC</h6><canvas id="gasChart"></canvas></div></div>
+      <div class="col-lg-6"><div class="card"><h6>Temperature (°C)</h6><canvas id="tempChart"></canvas></div></div>
+      <div class="col-lg-6"><div class="card"><h6>Current (A)</h6><canvas id="currentChart"></canvas></div></div>
+      <div class="col-lg-6"><div class="card"><h6>Voltage (V)</h6><canvas id="voltageChart"></canvas></div></div>
+    </div>
+  </div>
+
+  <footer>SIDF Hackathon 2025 × ACWA Power | Smart Hydrogen Monitoring Platform</footer>
+
+  <!-- Shutdown Confirmation Modal -->
+  <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title">⚠️ Confirm Shutdown</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          Are you sure you want to <strong>turn off</strong> the system?
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger" id="confirmShutdownBtn">Yes, Turn Off</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    // --- RUL bar + alerts ---
+    function setRUL(rul) {
+      const bar = document.getElementById("rul-bar");
+      const txt = document.getElementById("rul");
+      const r = Number(rul) || 0;
+      txt.textContent = `${r.toFixed(1)}%`;
+      bar.style.width = `${r}%`;
+      bar.className = "progress-bar";
+      if (r > 70) bar.classList.add("bg-success");
+      else if (r > 40) bar.classList.add("bg-warning");
+      else bar.classList.add("bg-danger");
+    }
+
+    function renderAlerts({ temperature_c }, rul) {
+      const alerts = [];
+      if (temperature_c > 60)
+        alerts.push(`<div class="alert alert-danger">🔴 Temperature exceeded 60°C</div>`);
+      if ((Number(rul) || 0) < 60)
+        alerts.push(`<div class="alert alert-warning">🟡 Maintenance required soon (RUL < 60%)</div>`);
+      document.getElementById('alerts-area').innerHTML = alerts.join('');
+    }
+
+    // --- Charts ---
+    const createChart = (ctx, label, color) => new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label, data: [], borderColor: color, tension: 0.35, fill: false, borderWidth: 2 }] },
+      options: { responsive: true, animation: false, plugins: { legend: { display: false } } }
+    });
+
+    const charts = {
+      gas_adc: createChart(document.getElementById('gasChart'), 'Gas ADC', '#198754'),
+      temperature_c: createChart(document.getElementById('tempChart'), 'Temperature (°C)', '#fd7e14'),
+      current_a: createChart(document.getElementById('currentChart'), 'Current (A)', '#0d6efd'),
+      voltage_v: createChart(document.getElementById('voltageChart'), 'Voltage (V)', '#6610f2')
+    };
+
+    // --- Data stream ---
+    const evtSource = new EventSource("/stream");
+    let csvData = [];
+
+    evtSource.onmessage = function (event) {
+      const data = JSON.parse(event.data);
+      const hist = data.history;
+      if (!hist || hist.length === 0) return;
+
+      setRUL(data.RUL);
+      const last = hist[hist.length - 1];
+      const t = new Date(last.timestamp * 1000).toLocaleTimeString();
+      renderAlerts({ temperature_c: last.temperature_c }, data.RUL);
+
+      csvData.push({
+        Time: t,
+        Gas_ADC: last.gas_adc,
+        Temperature_C: last.temperature_c,
+        Current_A: last.current_a,
+        Voltage_V: last.voltage_v
+      });
+
+      Object.keys(charts).forEach(key => {
+        const chart = charts[key];
+        const ds = chart.data.datasets[0];
+        if (chart.data.labels.length && chart.data.labels.at(-1) === t) return;
+        chart.data.labels.push(t);
+        ds.data.push(last[key]);
+        if (ds.data.length > 60) { chart.data.labels.shift(); ds.data.shift(); }
+        chart.update();
+      });
+    };
+
+    document.getElementById('downloadCSV').addEventListener('click', () => {
+      if (csvData.length === 0) { alert("No data available yet!"); return; }
+      let csvContent = "data:text/csv;charset=utf-8,Time,Gas_ADC,Temperature_C,Current_A,Voltage_V\n";
+      csvData.forEach(r => { csvContent += `${r.Time},${r.Gas_ADC},${r.Temperature_C},${r.Current_A},${r.Voltage_V}\n`; });
+      const link = document.createElement("a");
+      link.setAttribute("href", encodeURI(csvContent));
+      link.setAttribute("download", "hydrogen_sensor_history.csv");
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    });
+
+    // --- Toggle system control ---
+    const toggleBtn = document.getElementById("toggleSystemBtn");
+    const confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
+    const confirmShutdownBtn = document.getElementById("confirmShutdownBtn");
+    let systemOn = true;
+
+    toggleBtn.addEventListener("click", () => {
+      if (systemOn) {
+        confirmModal.show();
+      } else {
+        systemOn = true;
+        toggleBtn.textContent = "Turn Off";
+        toggleBtn.classList.remove("btn-success");
+        toggleBtn.classList.add("btn-danger");
+
+        // Send LED1_ON when system turns back on
+        fetch("/api/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: "LED1_ON" })
+        }).then(res => res.json()).then(console.log);
+      }
+    });
+
+    confirmShutdownBtn.addEventListener("click", () => {
+      confirmModal.hide();
+      systemOn = false;
+      toggleBtn.textContent = "Turn On";
+      toggleBtn.classList.remove("btn-danger");
+      toggleBtn.classList.add("btn-success");
+
+      // Send SHUTDOWN command
+      fetch("/api/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "LED1_OFF" })
+      }).then(res => res.json()).then(console.log);
+    });
+
+    toggleBtn.addEventListener("click", () => {
+      if (systemOn) {
+        // confirmModal.show();
+      } else {
+        systemOn = true;
+        toggleBtn.textContent = "Turn Off";
+        toggleBtn.classList.remove("btn-success");
+        toggleBtn.classList.add("btn-danger");
+
+        // Send LED1_ON when system turns back on
+        fetch("/api/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: "LED1_ON" })
+        }).then(res => res.json()).then(console.log);
+      }
+    });
+  </script>
+</body>
+</html>
